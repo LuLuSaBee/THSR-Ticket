@@ -18,6 +18,13 @@ from thsr_ticket.configs.common import (
     MAX_TICKET_NUM,
 )
 
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+
+import easyocr
 
 class FirstPageFlow:
     def __init__(self, client: HTTPRequest, record: Record = None) -> None:
@@ -143,4 +150,53 @@ def _input_security_code(img_resp: bytes) -> str:
     print('輸入驗證碼：')
     image = Image.open(io.BytesIO(img_resp))
     image.show()
-    return input()
+    image = test(img_resp)
+    reader = easyocr.Reader(['en'])  # 指定英文識別
+    result = reader.readtext(image)
+    print("辨識結果:", result[0][1], result[0][2])
+
+    return result[0][1][-4:]
+
+def test(image_bytes):
+    img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+    dst = cv2.fastNlMeansDenoisingColored(img, None, 35, 35, 7, 21)
+    ret,thresh = cv2.threshold(dst,127,255,cv2.THRESH_BINARY_INV)
+    imgarr = cv2.cvtColor(thresh, cv2.COLOR_BGR2GRAY)
+    h, w = imgarr.shape[:2]
+    imgarr[:, 5:w-5] = 0
+
+    imagedata = np.where(imgarr == 255)
+
+    X = np.array([imagedata[1]])
+    Y = h - imagedata[0]
+
+    poly_reg= PolynomialFeatures(degree = 2)
+    X_ = poly_reg.fit_transform(X.T)
+    regr = LinearRegression()
+    regr.fit(X_, Y)
+    X2 = np.array([[i for i in range(0,w)]])
+    X2_ = poly_reg.fit_transform(X2.T)
+    
+    # plt.scatter(X,Y, color="black")
+    # plt.xlim(xmin=0)
+    # plt.xlim(xmax=w)
+    # plt.ylim(ymin=0)
+    # plt.ylim(ymax=h)
+    # plt.plot(X2.T, regr.predict(X2_), color= "blue", linewidth = 3)
+    # plt.show()
+
+    newimg = cv2.cvtColor(thresh, cv2.COLOR_BGR2GRAY)
+
+    for ele in np.column_stack([regr.predict(X2_).round(0),X2[0],]):
+        pos = h-int(ele[0])
+        t = 3
+        b = 2
+        newimg[pos-t:pos+b,int(ele[1])] = 255 - newimg[pos-t:pos+b,int(ele[1])]
+
+    # plt.subplot(121)
+    # plt.imshow(thresh)
+    # plt.subplot(122)
+    # plt.imshow(newimg)
+    # plt.show()
+
+    return newimg
